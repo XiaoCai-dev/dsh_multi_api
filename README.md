@@ -1,4 +1,4 @@
-![多渠道模型中继](docs/preview.svg)
+![dsh_multi_api — DSH 多渠道模型中继](docs/banner.jpg)
 
 # dsh_multi_api
 
@@ -66,6 +66,18 @@ dsh plugin --profile desktop remove dsh_multi_api
 只配一个渠道时插件不产生任何行为差异，也不会发生切换——故障转移至少要两条渠道服务同一个逻辑模型。
 
 会话日志里 `provider` 恒为 `relay`，看不出实际走了哪个渠道；换渠道的记录只在插件的调用日志里。
+
+### 配置渠道
+
+![新增渠道表单](docs/setup-channel.png)
+
+Base URL 填到 `/v1` 为止，模型一栏支持 `逻辑名` 或 `逻辑名=上游模型名`——保存后这个渠道的模型绑定就以此为准，改完直接出现在会话的模型选择器里。
+
+### 在会话里使用
+
+![模型选择器里的 Channel relay 分组](docs/model-picker.png)
+
+选中即用，和原生模型没有区别。同一个逻辑模型若绑了多条渠道，分组里会带 `×N` 徽章——那是故障切换池的大小。
 
 ## 故障转移规则
 
