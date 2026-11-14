@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+*.log
+
+# 内部交付报告，不进仓库
+HANDOFF.md

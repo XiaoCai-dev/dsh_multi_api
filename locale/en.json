@@ -1,0 +1,10 @@
+{
+  "meta": {
+    "title": "Channel relay",
+    "description": "Configure multiple OpenAI-compatible channels and models from the left sidebar (`Channel relay`). Models registered under the `relay` provider automatically fail over to backup channels when a channel runs out of quota, hits rate limits, or encounters upstream errors.",
+    "detail": "docs/DETAIL.md"
+  },
+  "sidebar": {
+    "label": "Channel relay"
+  }
+}
