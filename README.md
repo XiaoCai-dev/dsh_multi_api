@@ -25,7 +25,7 @@
 ### 使用 `dsh` CLI 安装
 
 ```sh
-dsh plugin --profile desktop add git+https://github.com/xcnx666/dsh_multi_api.git
+dsh plugin --profile desktop add git+https://github.com/XiaoCai-dev/dsh_multi_api.git
 ```
 
 从本地目录安装（开发时用）：
@@ -37,7 +37,7 @@ dsh plugin --profile desktop add /path/to/dsh_multi_api
 更新：
 
 ```sh
-dsh plugin --profile desktop add git+https://github.com/xcnx666/dsh_multi_api.git
+dsh plugin --profile desktop add git+https://github.com/XiaoCai-dev/dsh_multi_api.git
 ```
 
 卸载：

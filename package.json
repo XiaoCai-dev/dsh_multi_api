@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "description": "DeepSeek Harness plugin: bind one logical model to several OpenAI-compatible endpoints and fail over automatically on quota exhaustion, rate limits, invalid keys, or upstream errors.",
   "license": "MIT",
-  "author": "xcnx666",
+  "author": "XiaoCai-dev",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/xcnx666/dsh_multi_api.git"
+    "url": "git+https://github.com/XiaoCai-dev/dsh_multi_api.git"
   },
-  "homepage": "https://github.com/xcnx666/dsh_multi_api#readme",
+  "homepage": "https://github.com/XiaoCai-dev/dsh_multi_api#readme",
   "bugs": {
-    "url": "https://github.com/xcnx666/dsh_multi_api/issues"
+    "url": "https://github.com/XiaoCai-dev/dsh_multi_api/issues"
   },
   "keywords": [
     "deepseek-harness",
