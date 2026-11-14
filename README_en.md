@@ -75,6 +75,8 @@ The session log always records `provider: relay`, so it never shows which channe
 
 The Base URL goes up to `/v1`. The model field accepts `logical` or `logical=upstream` — saving replaces this channel's bindings, and the result shows up in the model picker immediately.
 
+Leaving *effort levels* empty sends `low` or `high`, the intersection most relays accept; DSH's own levels are mapped into it. If the endpoint only knows `low, high, max`, write that list and the plugin maps into it. Getting it wrong is not fatal either: when the upstream answers 400 and names the valid values, the plugin remembers that vocabulary and retries once.
+
 ### Using it in a conversation
 
 ![The Channel relay group in the model picker](docs/model-picker.png)

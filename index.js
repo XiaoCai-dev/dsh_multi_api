@@ -96,6 +96,67 @@ function booleanOr(value, fallback) {
 	return typeof value === 'boolean' ? value : fallback
 }
 
+/**
+ * Effort vocabularies differ per endpoint: OpenAI accepts
+ * `minimal|low|medium|high`, others `low|high|max`, and DSH asks for its own
+ * `low|medium|high`. Forwarding the request verbatim makes a healthy channel
+ * answer `400 ReasoningEffort invalid`, so every request is mapped into the
+ * channel's own vocabulary first.
+ */
+const EFFORT_RANK = Object.freeze({ minimal: 1, low: 2, medium: 3, high: 4, xhigh: 5, max: 6 })
+
+/** Present in every vocabulary seen so far, so a channel without configuration still works. */
+const DEFAULT_EFFORTS = Object.freeze(['low', 'high'])
+
+function effortList(value) {
+	const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : []
+	const out = []
+	for (const entry of raw) {
+		const name = text(entry).trim().toLowerCase()
+		if (name !== '' && EFFORT_RANK[name] !== undefined && !out.includes(name)) out.push(name)
+	}
+	return out
+}
+
+/** What this route accepts: binding override, channel override, then the safe default. */
+function allowedEfforts(channel, binding) {
+	const fromBinding = effortList(binding?.reasoningEfforts)
+	if (fromBinding.length > 0) return fromBinding
+	const fromChannel = effortList(channel?.reasoningEfforts)
+	if (fromChannel.length > 0) return fromChannel
+	return [...DEFAULT_EFFORTS]
+}
+
+/** Round an effort into a vocabulary; `undefined` means "send no field at all". */
+function mapEffort(requested, allowed) {
+	const want = text(requested).trim().toLowerCase()
+	if (want === '' || want === 'off') return undefined
+	if (allowed.includes(want)) return want
+	const wantRank = EFFORT_RANK[want] ?? EFFORT_RANK.medium
+	let best
+	let bestDistance = Infinity
+	for (const candidate of allowed) {
+		const rank = EFFORT_RANK[candidate]
+		if (rank === undefined) continue
+		const distance = Math.abs(rank - wantRank)
+		// Ties round up: a caller asking for depth is better served by the
+		// stronger neighbour than by the weaker one.
+		if (distance < bestDistance || (distance === bestDistance && rank > (EFFORT_RANK[best] ?? 0))) {
+			best = candidate
+			bestDistance = distance
+		}
+	}
+	return best ?? allowed[0]
+}
+
+/** Pull the accepted vocabulary out of a 400 body such as `should be one of: low, high, max`. */
+function parseEffortChoices(bodyText) {
+	const match = /(?:should be one of|must be one of|allowed values)[\s:：]*([a-zA-Z0-9_, |\/\-]+)/i.exec(text(bodyText))
+	if (match === null) return undefined
+	const list = effortList(match[1].replace(/[|/]/g, ','))
+	return list.length === 0 ? undefined : list
+}
+
 /** Smallest declared value; `undefined` when nothing declares one. */
 function minDefined(values) {
 	let out
@@ -400,7 +461,7 @@ function serializeMessages(ctx, options) {
 	return messages
 }
 
-function buildRequestBody(ctx, route, options) {
+function buildRequestBody(ctx, route, options, efforts) {
 	const body = {
 		model: route.binding.upstreamModel,
 		messages: serializeMessages(ctx, options),
@@ -414,9 +475,9 @@ function buildRequestBody(ctx, route, options) {
 		body.tools = tools
 		body.tool_choice = 'auto'
 	}
-	const effort = options.reasoningEffort
-	if (route.binding.reasoning === true && typeof effort === 'string' && ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) {
-		body.reasoning_effort = effort
+	if (route.binding.reasoning === true) {
+		const mapped = mapEffort(options.reasoningEffort, efforts ?? allowedEfforts(route.channel, route.binding))
+		if (mapped !== undefined) body.reasoning_effort = mapped
 	}
 	return body
 }
@@ -590,10 +651,19 @@ class RelayAdapter {
 		if (contextWindow !== undefined) info.context = { contextWindow }
 		const maxTokens = minDefined(routes.map((entry) => positiveInt(entry.binding.maxTokens ?? entry.channel.maxTokens, undefined)))
 		if (maxTokens !== undefined) info.defaultMaxTokens = maxTokens
-		// Advertise efforts only when the whole pool honours them; a channel that
-		// ignores `reasoning_effort` would answer without the requested depth.
+		// Advertise efforts only when the whole pool honours them, and only the
+		// ones every channel in the pool accepts — otherwise the picker offers a
+		// level that some channel will reject with a 400.
 		if (routes.every((entry) => entry.binding.reasoning === true)) {
-			info.reasoning = { efforts: REASONING_EFFORTS.map((effort) => ({ ...effort })), defaultEffort: 'medium' }
+			const sets = routes.map((entry) => allowedEfforts(entry.channel, entry.binding))
+			const common = REASONING_EFFORTS
+				.map((effort) => effort.id)
+				.filter((id) => id !== 'off' && sets.every((set) => set.includes(id)))
+			const offered = common.length > 0 ? common : [...DEFAULT_EFFORTS]
+			info.reasoning = {
+				efforts: offered.map((id) => ({ id, name: id.charAt(0).toUpperCase() + id.slice(1) })),
+				defaultEffort: mapEffort('medium', offered) ?? offered[0],
+			}
 		}
 		return info
 	}
@@ -790,15 +860,31 @@ class RelayAdapter {
 		if (url === '') throw deviceFailure(`Channel "${text(route.channel.name)}" has no base URL`, 'INVALID_CREDENTIAL', 'auth')
 
 		let includeUsage = route.channel.includeUsage !== false
-		let response = await this.request(url, apiKey, route, options, includeUsage)
+		let efforts = allowedEfforts(route.channel, route.binding)
+		let response = await this.request(url, apiKey, route, options, includeUsage, efforts)
 		if (!response.ok) {
 			let bodyText = await safeText(response)
-			if (includeUsage && response.status === 400 && /stream_options|unknown|unrecognized|unsupported|invalid/i.test(bodyText)) {
+			// Only a complaint about the field itself counts: matching a bare
+			// "invalid" used to retry every 400 twice, doubling the noise.
+			if (includeUsage && response.status === 400
+				&& (/stream_options/i.test(bodyText)
+					|| /(unknown|unrecognized|unsupported)\s+(field|parameter|property|argument)/i.test(bodyText))) {
 				// Learn this endpoint's limits instead of retrying the same body forever.
 				includeUsage = false
 				await this.rememberNoUsage(route.channel)
-				response = await this.request(url, apiKey, route, options, false)
+				response = await this.request(url, apiKey, route, options, false, efforts)
 				if (!response.ok) bodyText = await safeText(response)
+			}
+			// A reasoning_effort the endpoint does not know is a vocabulary
+			// mismatch, not a bad request: learn its list and retry once.
+			if (response.status === 400 && route.binding.reasoning === true && /reasoning[_ ]?effort/i.test(bodyText)) {
+				const choices = parseEffortChoices(bodyText)
+				if (choices !== undefined && JSON.stringify(choices) !== JSON.stringify(efforts)) {
+					efforts = choices
+					await this.rememberEfforts(route.channel, choices)
+					response = await this.request(url, apiKey, route, options, includeUsage, efforts)
+					if (!response.ok) bodyText = await safeText(response)
+				}
 			}
 			if (!response.ok) {
 				throw descriptorFailure(classifyHttpFailure(response.status, errorDetail(bodyText), parseRetryAfter(response.headers?.get?.('retry-after'))))
@@ -975,8 +1061,8 @@ class RelayAdapter {
 		return { type: 'finish', reason }
 	}
 
-	async request(url, apiKey, route, options, includeUsage) {
-		const body = buildRequestBody(this.ctx, route, options)
+	async request(url, apiKey, route, options, includeUsage, efforts) {
+		const body = buildRequestBody(this.ctx, route, options, efforts)
 		if (includeUsage) body.stream_options = { include_usage: true }
 		return this.fetchOnce(url, apiKey, body, route, options.signal)
 	}
@@ -985,6 +1071,14 @@ class RelayAdapter {
 	async rememberNoUsage(channel) {
 		if (channel.includeUsage === false) return
 		await this.store.put('channels', channel.id, { ...channel, includeUsage: false, updatedAt: nowMs() })
+	}
+
+	/** Persist the effort vocabulary an endpoint reported, so later calls map into it. */
+	async rememberEfforts(channel, efforts) {
+		if (JSON.stringify(effortList(channel.reasoningEfforts)) === JSON.stringify(efforts)) return
+		// No model notification: the vocabulary only affects the effort list that
+		// `resolveModel` computes on the fly, not the catalog the picker shows.
+		await this.store.put('channels', channel.id, { ...channel, reasoningEfforts: efforts, updatedAt: nowMs() })
 	}
 
 	async fetchOnce(url, apiKey, body, route, signal) {
@@ -1153,6 +1247,7 @@ export async function apply(ctx, config) {
 				contextWindow: positiveInt(input?.contextWindow, previous.contextWindow),
 				maxTokens: positiveInt(input?.maxTokens, previous.maxTokens),
 				includeUsage: booleanOr(input?.includeUsage, previous.includeUsage ?? true),
+				reasoningEfforts: input?.reasoningEfforts === undefined ? previous.reasoningEfforts : effortList(input.reasoningEfforts),
 				headers: normalizedHeaders(input?.headers ?? previous.headers),
 				createdAt: previous.createdAt ?? nowMs(),
 				updatedAt: nowMs(),

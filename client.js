@@ -62,6 +62,8 @@ window.__ModuleLoader__.load({
       'panel.channels.quickModels': '该渠道支持的模型（逗号或换行分隔，支持 逻辑模型名=上游模型名）',
       'panel.channels.quickModelsPlaceholder': 'deepseek-chat, deepseek-reasoner, gpt-4o=openai/gpt-4o',
       'panel.channels.quickModelsHint': '逻辑模型名会出现在 DSH 模型选择器里；保存后本渠道的模型绑定以此为准。',
+      'panel.channels.reasoningEfforts': '上游支持的思考档位',
+      'panel.channels.reasoningEffortsHint': '留空则按 low, high 发送（各家词表不同，DSH 的档位会自动映射进去）；填了就以这里为准，例如 low, high, max。',
       'panel.channels.enabled': '启用该渠道',
       'panel.channels.save': '保存渠道',
       'panel.channels.saving': '保存中…',
@@ -183,6 +185,8 @@ window.__ModuleLoader__.load({
       'panel.channels.quickModels': 'Models this channel serves (comma or newline separated, `logical=upstream` supported)',
       'panel.channels.quickModelsPlaceholder': 'deepseek-chat, deepseek-reasoner, gpt-4o=openai/gpt-4o',
       'panel.channels.quickModelsHint': 'Logical names are what the model picker shows. Saving replaces this channel’s bindings.',
+      'panel.channels.reasoningEfforts': 'Effort levels the endpoint accepts',
+      'panel.channels.reasoningEffortsHint': 'Empty sends low or high (vocabularies differ; DSH levels are mapped in). Fill this to pin the list, e.g. low, high, max.',
       'panel.channels.enabled': 'Channel enabled',
       'panel.channels.save': 'Save channel',
       'panel.channels.saving': 'Saving…',
@@ -455,6 +459,7 @@ window.__ModuleLoader__.load({
           weight: '0',
           timeoutMs: '120000',
           enabled: true,
+          reasoningEfforts: '',
           quickModels: '',
           bindings: snapshot,
         })
@@ -495,6 +500,7 @@ window.__ModuleLoader__.load({
                 priority: int(draft.priority, 100),
                 weight: int(draft.weight, 0),
                 timeoutMs: int(draft.timeoutMs, 120_000),
+                reasoningEfforts: draft.reasoningEfforts,
                 models,
               })
               setDraft(null)
@@ -631,6 +637,20 @@ window.__ModuleLoader__.load({
                 value: draft.timeoutMs,
                 onChange: (event) => patch({ timeoutMs: event.target.value }),
               }),
+            ),
+            h(
+              'div',
+              { className: 'dcr-field dcr-wide' },
+              h('label', { htmlFor: 'dcr-efforts' }, `${t('panel.channels.reasoningEfforts')} · ${t('panel.field.optional')}`),
+              h('input', {
+                id: 'dcr-efforts',
+                type: 'text',
+                spellCheck: false,
+                value: draft.reasoningEfforts,
+                placeholder: 'low, high, max',
+                onChange: (event) => patch({ reasoningEfforts: event.target.value }),
+              }),
+              h('span', { className: 'dcr-fieldHint' }, t('panel.channels.reasoningEffortsHint')),
             ),
             h(
               'div',
@@ -928,6 +948,7 @@ window.__ModuleLoader__.load({
               weight: String(channel.weight ?? 0),
               timeoutMs: String(channel.timeoutMs ?? 120_000),
               enabled: channel.enabled !== false,
+              reasoningEfforts: (channel.reasoningEfforts ?? []).join(', '),
               quickModels: quickModelsOf(snapshot, channel.id),
               hasKey: channel.hasKey === true,
             })
